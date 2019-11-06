@@ -24,10 +24,12 @@ The configuration file needs to contain the following lines
 ```sh
 PATH=C:\Program Files (x86)\Guild Wars 2\addons\gw2clipboard
 CLOSE=1
+LOG=0
 ```
 
 * *Please use the path where you have installed GW2Clipboard if this default path is incorrect*
 * *If CLOSE is 1, GW2Clipboard will close when Guild Wars 2 closes, if it is set to 0, GW2Clipboard will minimize to the system tray when Guild Wars 2 closes*
+* *If LOG is 1, The plugin will create a debug log file*
 
 The next time you run Guild Wars 2, if configured correctly GW2Clipboard should be automatically run.
 

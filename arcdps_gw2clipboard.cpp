@@ -82,12 +82,25 @@ typedef struct ag {
 	uint16_t team; /* sep21+ */
 } ag;
 
+struct config_settings {
+	string gw2Path;
+	string addOnPath;
+	string gw2ClipboardExePath;
+	string gw2ExeFileName;
+	string settingFileName;
+
+	HANDLE hStdOut = NULL;
+	BOOL bExitOnClose = FALSE;
+	BOOL Log = FALSE;
+};
+
+config_settings config;
+
 /* proto/globals */
 uint32_t cbtcount = 0;
 arcdps_exports arc_exports;
 char* arcvers;
-string GW2ClipboardPath;
-BOOL bExitOnClose = false;
+
 void dll_init(HANDLE hModule);
 void dll_exit();
 extern "C" __declspec(dllexport) void* get_init_addr(char* arcversionstr, void* imguicontext, IDirect3DDevice9 * id3dd9);
@@ -96,6 +109,11 @@ arcdps_exports* mod_init();
 uintptr_t mod_release();
 uintptr_t mod_wnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 uintptr_t mod_callback(cbtevent* ev, ag* src, ag* dst, char* skillname, uint64_t id, uint64_t revision);
+
+BOOL configure();
+void debug_log(string msg, BOOL append);
+void debug_console(const char* msg);
+BOOL gw2clipboard_ipc(LPCVOID command);
 
 /* dll main -- winapi */
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD ulReasonForCall, LPVOID lpReserved) {
@@ -109,30 +127,28 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD ulReasonForCall, LPVOID lpReserved) 
 	return 1;
 }
 
-/* dll attach -- from winapi */
-void dll_init(HANDLE hModule) {
-	return;
+
+void debug_console(const char* msg) {
+#ifdef _DEBUG
+	DWORD written;
+	WriteConsole(config.hStdOut, msg, (DWORD)strlen(msg), &written, NULL);
+#endif
 }
 
-/* dll detach -- from winapi */
-void dll_exit() {
-	return;
-}
+void debug_log(string msg, BOOL append = TRUE) {
+	if (config.Log) {
+		ofstream outfile;
 
-/* export -- arcdps looks for this exported function and calls the address it returns on client load */
-extern "C" __declspec(dllexport) void* get_init_addr(char* arcversionstr, void* imguicontext, IDirect3DDevice9 * id3dd9) {
-	arcvers = arcversionstr;
-	//ImGui::SetCurrentContext((ImGuiContext*)imguicontext);
-	return mod_init;
-}
+		outfile.open(config.addOnPath + "\\arcdps_gw2clipboard_debug.txt", append ? ios_base::app : ios_base::trunc);
+		outfile << msg << "\n";
 
-/* export -- arcdps looks for this exported function and calls the address it returns on client exit */
-extern "C" __declspec(dllexport) void* get_release_addr() {
-	arcvers = 0;
-	return mod_release;
+		outfile.close();
+	}
+	debug_console((msg + "\n").c_str());
 }
 
 BOOL gw2clipboard_ipc(LPCVOID command) {
+	debug_log("gw2clipboard_ipc");
 	try {
 		DWORD dwWritten;
 		HANDLE hPipe = CreateFile(TEXT("\\\\.\\pipe\\pipe_gw2cp"),
@@ -151,27 +167,61 @@ BOOL gw2clipboard_ipc(LPCVOID command) {
 				&dwWritten,
 				NULL);
 
+			FlushFileBuffers(hPipe);
 			CloseHandle(hPipe);
+			debug_log("gw2clipboard_ipc - sent");
 			return TRUE;
 		}
 	}
 	catch (exception & e) {
+		debug_log("gw2clipboard_ipc - failed: " + string(e.what()));
 		e;
 	}
 	return FALSE;
 }
 
-/* initialize mod -- return table that arcdps will use for callbacks */
-arcdps_exports* mod_init() {
+/* dll attach -- from winapi */
+void dll_init(HANDLE hModule) {
 #ifdef _DEBUG
 	AllocConsole();
+	config.hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
 #endif
-	/* big buffer */
-	char buff[4096];
-	char* p = &buff[0];
-	p += _snprintf(p, 400, "==== mod_init ====\n");
-	p += _snprintf(p, 400, "arcdps: %s\n", arcvers);
+	configure();
+	debug_log("dll_init");
+	return;
+}
 
+/* dll detach -- from winapi */
+void dll_exit() {
+	debug_log("dll_exit");
+	if (!config.gw2ClipboardExePath.empty()) {
+		if (config.bExitOnClose) gw2clipboard_ipc("mod_release:exit\n");
+		else gw2clipboard_ipc("mod_release\n");
+	}
+
+#ifdef _DEBUG
+	FreeConsole();
+#endif // _DEBUG
+	return;
+}
+
+/* export -- arcdps looks for this exported function and calls the address it returns on client load */
+extern "C" __declspec(dllexport) void* get_init_addr(char* arcversionstr, void* imguicontext, IDirect3DDevice9 * id3dd9) {
+	debug_log("get_init_addr");
+	arcvers = arcversionstr;
+	//ImGui::SetCurrentContext((ImGuiContext*)imguicontext);
+	return mod_init;
+}
+
+/* export -- arcdps looks for this exported function and calls the address it returns on client exit */
+extern "C" __declspec(dllexport) void* get_release_addr() {
+	debug_log("get_release_addr");
+	arcvers = 0;
+	return mod_release;
+}
+
+BOOL configure() {
+	debug_log("configure", FALSE);
 	try {
 		TCHAR gw2Filename[512];
 		int bytes = GetModuleFileName(NULL, gw2Filename, 512);
@@ -179,66 +229,67 @@ arcdps_exports* mod_init() {
 			string s = gw2Filename;
 
 			size_t i = s.rfind("\\", s.length());
-			string path = s.substr(0, i + 1);
-			string filename = s.substr(i + 1, s.length() - i);
-			string addOnPath = path + "\\addons\\gw2clipboard";
-			string settingFileName = addOnPath + "\\gw2clipboard.ini";
+			config.gw2Path = s.substr(0, i);
+			config.gw2ExeFileName = s.substr(i + 1, s.length() - i);
+			config.addOnPath = config.gw2Path + "\\addons\\gw2clipboard";
+			config.settingFileName = config.addOnPath + "\\gw2clipboard.ini";
 
-			fs::create_directories(addOnPath);
-			if (fs::exists(settingFileName)) {
+			fs::create_directories(config.addOnPath);
+			if (fs::exists(config.settingFileName)) {
 				ifstream file;
-				file.open(settingFileName);
+				file.open(config.settingFileName);
 				for (string line; getline(file, line); )
 				{
 					size_t i = line.find("=");
 					if (i != string::npos) {
-						string option =  line.substr(0, i);
+						string option = line.substr(0, i);
 						string value = line.substr(i + 1, line.length() - i);
-						if (option == "PATH") GW2ClipboardPath = value;
-						if (option == "CLOSE" && value=="1") bExitOnClose = TRUE;
+						if (option == "PATH") config.gw2ClipboardExePath = value;
+						if (option == "CLOSE" && value == "1") config.bExitOnClose = TRUE;
+						if (option == "LOG" && value == "1") config.Log = TRUE;
 					}
 				}
 				file.close();
 			}
 			else {
-				ofstream file(settingFileName);
-				file << "PATH=" + addOnPath + "\n";
+				ofstream file(config.settingFileName);
+				file << "PATH=" + config.addOnPath + "\n";
 				file << "CLOSE=1\n";
+				file << "LOG=0\n";
 				file.close();
 
-				GW2ClipboardPath = addOnPath;
-				bExitOnClose = TRUE;
+				config.gw2ClipboardExePath = config.addOnPath;
+				config.bExitOnClose = TRUE;
+				config.Log = FALSE;
 			}
-			if (!GW2ClipboardPath.empty() && !fs::exists(GW2ClipboardPath + "\\GW2Clipboard.exe")) GW2ClipboardPath.clear();
+			if (!config.gw2ClipboardExePath.empty() && !fs::exists(config.gw2ClipboardExePath + "\\GW2Clipboard.exe")) config.gw2ClipboardExePath.clear();
 
-			if (i != string::npos) {
-				p += _snprintf(p, 400, "path: %s\n", path.c_str());
-				p += _snprintf(p, 400, "filename: %s\n", filename.c_str());
-				p += _snprintf(p, 400, "gw2clipboard exe: %s\n", (GW2ClipboardPath + "\\GW2Clipboard.exe").c_str());
-			}
+			debug_log("Config:\ngw2Path:" + config.gw2Path + "\naddOnPath:" + config.addOnPath + "\nsettingFileName:" + config.settingFileName + "\ngw2ClipboardPath:" + config.gw2ClipboardExePath);
+
+			return TRUE;
 		}
-		throw exception("why not");
 	}
 	catch (exception & e) {
-		p += _snprintf(p, 400, "Exception: %s\n", e.what());
+		debug_log("Exception" + string(e.what()));
 	}
 
-	if (!GW2ClipboardPath.empty()) {
+	return FALSE;
+}
+
+/* initialize mod -- return table that arcdps will use for callbacks */
+arcdps_exports* mod_init() {
+	debug_log("==== mod_init ====");
+	debug_log("arcdps: " + string(arcvers));
+
+	if (!config.gw2ClipboardExePath.empty()) {
 		if (!gw2clipboard_ipc("mod_init\n")) {
-			p += _snprintf(p, 400, "gw2clipboard IPC not found\n");
-			ShellExecute(NULL, "open", "gw2clipboard.exe", NULL, GW2ClipboardPath.c_str(), SW_SHOWDEFAULT);
+			debug_log("gw2clipboard IPC not found");
+			ShellExecute(NULL, "open", "gw2clipboard.exe", NULL, config.gw2ClipboardExePath.c_str(), SW_SHOWDEFAULT);
 		}
 	}
 	else {
-		p += _snprintf(p, 400, "Could not resolve gw2clipboard.exe at: %s\n", GW2ClipboardPath.c_str());
+		debug_log("Could not resolve gw2clipboard.exe at: " + config.gw2ClipboardExePath);
 	}
-
-#ifdef _DEBUG
-	/* print */
-	DWORD written = 0;
-	HANDLE hnd = GetStdHandle(STD_OUTPUT_HANDLE);
-	WriteConsoleA(hnd, &buff[0], (DWORD)(p - &buff[0]), &written, 0);
-#endif
 
 	char name[] = "gw2clipboard";
 	char version[] = "1.0";
@@ -264,15 +315,6 @@ arcdps_exports* mod_init() {
 
 /* release mod -- return ignored */
 uintptr_t mod_release() {
-	if (!GW2ClipboardPath.empty()) {
-		if (bExitOnClose) gw2clipboard_ipc("mod_release:exit\n");
-		else gw2clipboard_ipc("mod_release\n");
-	}
-
-#ifdef _DEBUG
-	FreeConsole();
-#endif // _DEBUG
-
 	return 0;
 }
 
