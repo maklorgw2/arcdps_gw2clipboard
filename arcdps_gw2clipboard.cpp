@@ -20,18 +20,22 @@
 #include <sstream>
 #include <string>
 #include <exception>
+#include "imgui/imgui.h"
 
 namespace fs = std::filesystem;
 using namespace std;
 
 struct IDirect3DDevice9;
 
+struct ImGuiContext;
+
 /* arcdps export table */
 typedef struct arcdps_exports {
 	uintptr_t size; /* size of exports table */
-	uintptr_t sig; /* pick a number between 0 and uint64_t max that isn't used by other modules */
-	char* out_name; /* name string */
-	char* out_build; /* build string */
+	uint32_t sig; /* pick a number between 0 and uint32_t max that isn't used by other modules */
+	uint32_t imguivers; /* set this to IMGUI_VERSION_NUM. if you don't use imgui, 18000 (as of 2021-02-02) */
+	const char* out_name; /* name string */
+	const char* out_build; /* build string */
 	void* wnd_nofilter; /* wndproc callback, fn(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) */
 	void* combat; /* combat event callback, fn(cbtevent* ev, ag* src, ag* dst, char* skillname, uint64_t id, uint64_t revision) */
 	void* imgui; /* id3dd9::present callback, before imgui::render, fn(uint32_t not_charsel_or_loading) */
@@ -103,7 +107,7 @@ char* arcvers;
 
 void dll_init(HANDLE hModule);
 void dll_exit();
-extern "C" __declspec(dllexport) void* get_init_addr(char* arcversionstr, void* imguicontext, IDirect3DDevice9 * id3dd9);
+extern "C" __declspec(dllexport) void* get_init_addr(char* arcversion, ImGuiContext * imguictx, void* id3dd9, HANDLE arcdll, void* mallocfn, void* freefn);
 extern "C" __declspec(dllexport) void* get_release_addr();
 arcdps_exports* mod_init();
 uintptr_t mod_release();
@@ -206,10 +210,14 @@ void dll_exit() {
 }
 
 /* export -- arcdps looks for this exported function and calls the address it returns on client load */
-extern "C" __declspec(dllexport) void* get_init_addr(char* arcversionstr, void* imguicontext, IDirect3DDevice9 * id3dd9) {
+extern "C" __declspec(dllexport) void* get_init_addr(char* arcversion, ImGuiContext * imguictx, void* id3dd9, HANDLE arcdll, void* mallocfn, void* freefn) {
 	debug_log("get_init_addr");
-	arcvers = arcversionstr;
-	//ImGui::SetCurrentContext((ImGuiContext*)imguicontext);
+	arcvers = arcversion;
+	//filelog = (void*)GetProcAddress((HMODULE)arcdll, "e3");
+	//arclog = (void*)GetProcAddress((HMODULE)arcdll, "e8");
+	ImGui::SetCurrentContext((ImGuiContext*)imguictx);
+	ImGui::SetAllocatorFunctions((void* (*)(size_t, void*))mallocfn, (void (*)(void*, void*))freefn); // on imgui 1.80+
+
 	return mod_init;
 }
 
@@ -276,6 +284,23 @@ BOOL configure() {
 	return FALSE;
 }
 
+
+
+uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
+	//try {
+	//	if (!not_charsel_or_loading) return 0;
+	//	bool& showKillproof = Settings::instance().getShowKillproof();
+	//	ShowKillproof(&showKillproof);
+	//	ShowSettings(&show_settings);
+	//}
+	//catch (const std::exception& e) {
+	//	arc_log(e.what());
+	//	throw e;
+	//}
+
+	return 0;
+}
+
 /* initialize mod -- return table that arcdps will use for callbacks */
 arcdps_exports* mod_init() {
 	debug_log("==== mod_init ====");
@@ -298,6 +323,7 @@ arcdps_exports* mod_init() {
 	memset(&arc_exports, 0, sizeof(arcdps_exports));
 	arc_exports.sig = 0x7331;
 	arc_exports.size = sizeof(arcdps_exports);
+	arc_exports.imguivers = IMGUI_VERSION_NUM;
 	arc_exports.out_name = name;
 	arc_exports.out_build = version;
 
@@ -307,7 +333,10 @@ arcdps_exports* mod_init() {
 #else
 	arc_exports.wnd_nofilter = NULL;
 	arc_exports.combat = NULL;
-#endif // _DEBUG
+	arc_exports.options_end = NULL;
+#endif
+	arc_exports.imgui = mod_imgui;
+	// _DEBUG
 	//arc_exports.size = (uintptr_t)"error message if you decide to not load, sig must be 0";
 
 	return &arc_exports;
