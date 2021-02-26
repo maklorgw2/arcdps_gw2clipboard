@@ -287,17 +287,6 @@ BOOL configure() {
 
 
 uintptr_t mod_imgui(uint32_t not_charsel_or_loading) {
-	//try {
-	//	if (!not_charsel_or_loading) return 0;
-	//	bool& showKillproof = Settings::instance().getShowKillproof();
-	//	ShowKillproof(&showKillproof);
-	//	ShowSettings(&show_settings);
-	//}
-	//catch (const std::exception& e) {
-	//	arc_log(e.what());
-	//	throw e;
-	//}
-
 	return 0;
 }
 
@@ -316,8 +305,8 @@ arcdps_exports* mod_init() {
 		debug_log("Could not resolve gw2clipboard.exe at: " + config.gw2ClipboardExePath);
 	}
 
-	char name[] = "gw2clipboard";
-	char version[] = "1.0";
+	static char name[] = "gw2clipboard";
+	static char version[] = "1.0";
 
 	/* for arcdps */
 	memset(&arc_exports, 0, sizeof(arcdps_exports));
