@@ -306,7 +306,7 @@ arcdps_exports* mod_init() {
 	}
 
 	static char name[] = "gw2clipboard";
-	static char version[] = "1.0";
+	static char version[] = "1.1";
 
 	/* for arcdps */
 	memset(&arc_exports, 0, sizeof(arcdps_exports));
